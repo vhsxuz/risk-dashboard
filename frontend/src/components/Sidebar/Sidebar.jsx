@@ -44,7 +44,10 @@ const Sidebar = ({
     <>
       <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-header">
-          <h1>🗺️ Prisma Risk Validator</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+            <span style={{ fontSize: '1.2rem' }}>🗺️</span>
+            <h1>Prisma Risk Validator</h1>
+          </div>
           <p>Interactive visualization of BNPB disaster risk imagery layers across Indonesia.</p>
         </div>
 
