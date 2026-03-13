@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=69.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "esri-fast-api"
+version = "0.1.0"
+description = "Starter FastAPI service for ESRI-style integrations."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "ESRI FastAPI" }]
+license = { text = "MIT" }
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "pydantic>=2.6.4",
+    "pydantic-settings>=2.2.1",
+    "httpx>=0.27.0",
+    "arcgis"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.1.1",
+    "pytest-asyncio>=0.23.5",
+    "ruff>=0.3.0",
+    "mypy>=1.9.0"
+]
+
+[tool.setuptools]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+asyncio_mode = "strict"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.10"
+strict = false
+packages = ["app"]
+warn_unreachable = true
+show_error_codes = true

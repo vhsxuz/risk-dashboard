@@ -1,0 +1,6 @@
+#!/Users/andreasalexander/Documents/BPT/Grading/esri-fast-api/venv_310/bin/python3.10
+import sys
+from geomet.tool import cli
+if __name__ == '__main__':
+    sys.argv[0] = sys.argv[0].removesuffix('.exe')
+    sys.exit(cli())

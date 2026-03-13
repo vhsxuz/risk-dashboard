@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Indonesia Disaster Risk Map — BNPB InaRISK</title>
+  <meta name="description" content="Interactive data visualization of flood, earthquake, and liquefaction risk across Indonesia using BNPB InaRISK imagery layers." />
+
+  <!-- ArcGIS Maps SDK for JavaScript 4.29 -->
+  <link rel="stylesheet" href="https://js.arcgis.com/4.29/esri/themes/dark/main.css" />
+  <script src="https://js.arcgis.com/4.29/"></script>
+
+  <!-- Google Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ── Reset & Base ─────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; font-family: 'Inter', system-ui, sans-serif; background: #0a0e17; color: #e2e8f0; }
+
+    /* ── Layout ───────────────────────────────── */
+    #app { display: flex; height: 100vh; overflow: hidden; }
+
+    /* ── Sidebar ──────────────────────────────── */
+    #sidebar {
+      width: 340px; min-width: 340px;
+      display: flex; flex-direction: column;
+      background: rgba(15, 20, 35, 0.85);
+      backdrop-filter: blur(24px) saturate(1.4);
+      -webkit-backdrop-filter: blur(24px) saturate(1.4);
+      border-right: 1px solid rgba(255,255,255,0.07);
+      z-index: 10;
+      transition: transform 0.35s cubic-bezier(.4,0,.2,1);
+    }
+    #sidebar.collapsed { transform: translateX(-340px); min-width: 0; width: 0; }
+
+    .sidebar-header {
+      padding: 28px 24px 20px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .sidebar-header h1 {
+      font-size: 1.15rem; font-weight: 700;
+      background: linear-gradient(135deg, #60a5fa, #a78bfa, #f472b6);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: -0.02em;
+    }
+    .sidebar-header p { font-size: 0.78rem; color: #94a3b8; margin-top: 6px; line-height: 1.5; }
+
+    .sidebar-body { flex: 1; overflow-y: auto; padding: 20px 24px; }
+    .sidebar-body::-webkit-scrollbar { width: 4px; }
+    .sidebar-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+
+    /* ── Section Headers ─────────────────────── */
+    .section-label {
+      font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
+      color: #64748b; margin-bottom: 12px;
+    }
+
+    /* ── Layer Card ───────────────────────────── */
+    .layer-card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px; padding: 16px;
+      margin-bottom: 12px;
+      transition: all 0.25s ease;
+      cursor: pointer;
+    }
+    .layer-card:hover { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.12); transform: translateY(-1px); }
+    .layer-card.active { border-color: rgba(96,165,250,0.4); background: rgba(96,165,250,0.06); }
+
+    .layer-card-header { display: flex; align-items: center; gap: 12px; }
+
+    .layer-icon {
+      width: 38px; height: 38px; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.2rem; flex-shrink: 0;
+    }
+    .icon-banjir   { background: linear-gradient(135deg, #1e40af, #3b82f6); }
+    .icon-gempa    { background: linear-gradient(135deg, #b91c1c, #ef4444); }
+    .icon-likuifikasi { background: linear-gradient(135deg, #b45309, #f59e0b); }
+    .icon-kriminalitas { background: linear-gradient(135deg, #6d28d9, #a78bfa); }
+
+    .layer-info { flex: 1; min-width: 0; }
+    .layer-name { font-size: 0.88rem; font-weight: 600; color: #f1f5f9; }
+    .layer-desc { font-size: 0.72rem; color: #94a3b8; margin-top: 2px; }
+
+    /* ── Toggle Switch ────────────────────────── */
+    .toggle { position: relative; width: 42px; height: 24px; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-track {
+      position: absolute; inset: 0; border-radius: 12px;
+      background: rgba(255,255,255,0.1);
+      transition: background 0.3s ease;
+      cursor: pointer;
+    }
+    .toggle-track::after {
+      content: ''; position: absolute;
+      top: 3px; left: 3px; width: 18px; height: 18px;
+      border-radius: 50%; background: #e2e8f0;
+      transition: transform 0.3s cubic-bezier(.4,0,.2,1), background 0.3s;
+    }
+    .toggle input:checked + .toggle-track { background: #3b82f6; }
+    .toggle input:checked + .toggle-track::after { transform: translateX(18px); background: #fff; }
+
+    /* ── Opacity Slider ──────────────────────── */
+    .opacity-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+    .opacity-label { font-size: 0.68rem; color: #64748b; white-space: nowrap; }
+    .opacity-slider {
+      -webkit-appearance: none; appearance: none;
+      flex: 1; height: 4px; border-radius: 2px;
+      background: rgba(255,255,255,0.1); outline: none;
+    }
+    .opacity-slider::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: #60a5fa; cursor: pointer; border: 2px solid #1e293b;
+      transition: transform 0.15s; box-shadow: 0 0 6px rgba(96,165,250,0.4);
+    }
+    .opacity-slider::-webkit-slider-thumb:hover { transform: scale(1.2); }
+
+    /* ── Coordinates Info Card ────────────────── */
+    .info-section { margin-top: 24px; }
+
+    .coord-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px; padding: 16px;
+    }
+    .coord-card .coord-row { display: flex; justify-content: space-between; margin-bottom: 6px; }
+    .coord-card .coord-label { font-size: 0.72rem; color: #64748b; }
+    .coord-card .coord-value { font-size: 0.78rem; font-weight: 500; color: #cbd5e1; font-variant-numeric: tabular-nums; }
+
+    .risk-results { margin-top: 16px; }
+    .risk-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-top: 1px solid rgba(255,255,255,0.04); }
+    .risk-label { font-size: 0.75rem; color: #94a3b8; }
+    .risk-badge {
+      font-size: 0.68rem; font-weight: 600; padding: 3px 10px;
+      border-radius: 20px; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .risk-tinggi        { background: rgba(239,68,68,0.15); color: #fca5a5; }
+    .risk-sangat-tinggi { background: rgba(190,18,60,0.20); color: #fda4af; border: 1px solid rgba(239,68,68,0.35); }
+    .risk-sedang  { background: rgba(245,158,11,0.15); color: #fcd34d; }
+    .risk-rendah  { background: rgba(34,197,94,0.15);  color: #86efac; }
+    .risk-aman    { background: rgba(96,165,250,0.15); color: #93c5fd; }
+    .risk-unknown { background: rgba(255,255,255,0.06); color: #64748b; }
+
+    .hint-text { font-size: 0.70rem; color: #475569; margin-top: 12px; text-align: center; line-height: 1.5; }
+
+    /* ── Search Section ───────────────────────── */
+    .search-section { margin-bottom: 20px; }
+
+    .search-tabs {
+      display: flex; gap: 4px; margin-bottom: 12px;
+      background: rgba(255,255,255,0.04); border-radius: 10px; padding: 3px;
+    }
+    .search-tab {
+      flex: 1; padding: 7px 0; border: none; border-radius: 8px;
+      background: transparent; color: #64748b;
+      font-family: inherit; font-size: 0.72rem; font-weight: 600;
+      cursor: pointer; transition: all 0.25s ease;
+      letter-spacing: 0.02em;
+    }
+    .search-tab:hover { color: #94a3b8; }
+    .search-tab.active {
+      background: rgba(96,165,250,0.15); color: #60a5fa;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+    }
+
+    .search-panel { display: none; }
+    .search-panel.active { display: block; }
+
+    .search-input-group { position: relative; margin-bottom: 10px; }
+    .search-input {
+      width: 100%; padding: 10px 14px; padding-right: 40px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px; color: #e2e8f0;
+      font-family: inherit; font-size: 0.82rem;
+      outline: none; transition: all 0.25s ease;
+    }
+    .search-input::placeholder { color: #475569; }
+    .search-input:focus { border-color: rgba(96,165,250,0.5); background: rgba(255,255,255,0.07); }
+
+    .coord-input-row { display: flex; gap: 8px; margin-bottom: 10px; }
+    .coord-input-row .search-input { padding-right: 14px; }
+    .coord-field { flex: 1; }
+    .coord-field label {
+      display: block; font-size: 0.65rem; font-weight: 600;
+      color: #64748b; margin-bottom: 5px; text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .search-btn {
+      width: 100%; padding: 10px 16px;
+      background: linear-gradient(135deg, #3b82f6, #6366f1);
+      border: none; border-radius: 10px;
+      color: #fff; font-family: inherit;
+      font-size: 0.78rem; font-weight: 600;
+      cursor: pointer; transition: all 0.25s ease;
+      letter-spacing: 0.02em;
+    }
+    .search-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(59,130,246,0.35); }
+    .search-btn:active { transform: translateY(0); }
+    .search-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+    .search-results {
+      margin-top: 10px; max-height: 180px; overflow-y: auto;
+      border-radius: 10px;
+    }
+    .search-results::-webkit-scrollbar { width: 3px; }
+    .search-results::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+
+    .search-result-item {
+      padding: 10px 12px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 8px; margin-bottom: 4px;
+      cursor: pointer; transition: all 0.2s ease;
+    }
+    .search-result-item:hover { background: rgba(96,165,250,0.1); border-color: rgba(96,165,250,0.25); }
+    .search-result-name { font-size: 0.78rem; color: #e2e8f0; font-weight: 500; }
+    .search-result-type { font-size: 0.65rem; color: #64748b; margin-top: 2px; }
+
+    .search-status {
+      font-size: 0.70rem; color: #64748b; text-align: center;
+      padding: 8px 0; display: none;
+    }
+    .search-status.visible { display: block; }
+    .search-status.error { color: #fca5a5; }
+
+    /* ── Sidebar Footer ──────────────────────── */
+    .sidebar-footer {
+      padding: 16px 24px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+      font-size: 0.65rem; color: #475569; text-align: center;
+    }
+
+    /* ── Toggle Sidebar Button ────────────────── */
+    #toggle-sidebar {
+      position: fixed; top: 16px; left: 16px; z-index: 20;
+      width: 40px; height: 40px; border-radius: 10px;
+      background: rgba(15,20,35,0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #94a3b8; font-size: 1.1rem;
+      display: none; align-items: center; justify-content: center;
+      cursor: pointer; transition: all 0.2s;
+    }
+    #toggle-sidebar:hover { background: rgba(255,255,255,0.1); color: #e2e8f0; }
+    #sidebar.collapsed ~ #toggle-sidebar { display: flex; }
+
+    /* ── Map Container ────────────────────────── */
+    #map-container { flex: 1; position: relative; }
+    #viewDiv { width: 100%; height: 100%; }
+
+    /* ── Loading Overlay ─────────────────────── */
+    #loading-overlay {
+      position: absolute; inset: 0; z-index: 50;
+      background: #0a0e17;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      transition: opacity 0.6s ease;
+    }
+    #loading-overlay.hidden { opacity: 0; pointer-events: none; }
+
+    .loader-ring {
+      width: 48px; height: 48px; border-radius: 50%;
+      border: 3px solid rgba(255,255,255,0.08);
+      border-top-color: #60a5fa;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loader-text { margin-top: 16px; font-size: 0.82rem; color: #64748b; }
+
+    /* ── Responsive ───────────────────────────── */
+    @media (max-width: 768px) {
+      #sidebar { position: fixed; top: 0; left: 0; bottom: 0; width: 300px; min-width: 300px; z-index: 30; }
+      #sidebar.collapsed { transform: translateX(-300px); }
+      #toggle-sidebar { display: flex !important; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <!-- ── Sidebar ──────────────────────────── -->
+    <aside id="sidebar">
+      <div class="sidebar-header">
+        <h1>🗺️ Prisma Risk Validator</h1>
+        <p>Interactive visualization of BNPB disaster risk imagery layers across Indonesia.</p>
+      </div>
+
+      <div class="sidebar-body">
+        <!-- Search -->
+        <div class="search-section">
+          <div class="section-label">Find Location</div>
+          <div class="search-tabs">
+            <button class="search-tab active" id="tab-location" type="button">🔍 Location</button>
+            <button class="search-tab" id="tab-coords" type="button">📍 Coordinates</button>
+          </div>
+
+          <!-- Location Search Panel -->
+          <div class="search-panel active" id="panel-location">
+            <div class="search-input-group">
+              <input type="text" class="search-input" id="input-location" placeholder="Search city, address, place…" autocomplete="off" />
+            </div>
+            <button class="search-btn" id="btn-search" type="button">Search</button>
+            <div class="search-status" id="search-status"></div>
+            <div class="search-results" id="search-results"></div>
+          </div>
+
+          <!-- Coordinates Panel -->
+          <div class="search-panel" id="panel-coords">
+            <div class="coord-input-row">
+              <div class="coord-field">
+                <label for="input-lat">Latitude</label>
+                <input type="number" class="search-input" id="input-lat" placeholder="e.g. -6.2088" step="any" min="-90" max="90" />
+              </div>
+              <div class="coord-field">
+                <label for="input-lon">Longitude</label>
+                <input type="number" class="search-input" id="input-lon" placeholder="e.g. 106.8456" step="any" min="-180" max="180" />
+              </div>
+            </div>
+            <button class="search-btn" id="btn-goto" type="button">Go to Location</button>
+          </div>
+        </div>
+
+        <!-- Layers -->
+        <div class="section-label">Layers</div>
+
+        <div class="layer-card active" id="card-banjir">
+          <div class="layer-card-header">
+            <div class="layer-icon icon-banjir">🌊</div>
+            <div class="layer-info">
+              <div class="layer-name">Bahaya Banjir</div>
+              <div class="layer-desc">Flood risk index</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="toggle-banjir" checked />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <div class="opacity-row">
+            <span class="opacity-label">Opacity</span>
+            <input type="range" class="opacity-slider" id="opacity-banjir" min="0" max="100" value="70" />
+          </div>
+        </div>
+
+        <div class="layer-card active" id="card-gempa">
+          <div class="layer-card-header">
+            <div class="layer-icon icon-gempa">🔴</div>
+            <div class="layer-info">
+              <div class="layer-name">Bahaya Gempa Bumi</div>
+              <div class="layer-desc">Earthquake hazard classification</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="toggle-gempa" checked />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <div class="opacity-row">
+            <span class="opacity-label">Opacity</span>
+            <input type="range" class="opacity-slider" id="opacity-gempa" min="0" max="100" value="70" />
+          </div>
+        </div>
+
+        <div class="layer-card active" id="card-kriminalitas">
+          <div class="layer-card-header">
+            <div class="layer-icon icon-kriminalitas">🚨</div>
+            <div class="layer-info">
+              <div class="layer-name">Indeks Kriminalitas</div>
+              <div class="layer-desc">Criminality index by province</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="toggle-kriminalitas" checked />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <div class="opacity-row">
+            <span class="opacity-label">Opacity</span>
+            <input type="range" class="opacity-slider" id="opacity-kriminalitas" min="0" max="100" value="70" />
+          </div>
+          <!-- <div class="crime-legend">
+            <div class="crime-legend-row"><span class="crime-dot crime-dot-property"></span>Property Crime</div>
+            <div class="crime-legend-row"><span class="crime-dot crime-dot-physical"></span>Physical Crime</div>
+            <div class="crime-legend-row"><span class="crime-dot crime-dot-narcotics"></span>Narcotics</div>
+            <div class="crime-legend-row"><span class="crime-dot crime-dot-fraud"></span>Fraud / Corruption</div>
+          </div> -->
+        </div>
+
+        <div class="layer-card active" id="card-likuifikasi">
+          <div class="layer-card-header">
+            <div class="layer-icon icon-likuifikasi">⚠️</div>
+            <div class="layer-info">
+              <div class="layer-name">Bahaya Likuifikasi</div>
+              <div class="layer-desc">Liquefaction risk index</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="toggle-likuifikasi" checked />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <div class="opacity-row">
+            <span class="opacity-label">Opacity</span>
+            <input type="range" class="opacity-slider" id="opacity-likuifikasi" min="0" max="100" value="70" />
+          </div>
+        </div>
+
+        <!-- Identify Results -->
+        <div class="info-section">
+          <div class="section-label">Identify Result</div>
+          <div class="coord-card" id="identify-card">
+            <div class="coord-row">
+              <span class="coord-label">Latitude</span>
+              <span class="coord-value" id="val-lat">—</span>
+            </div>
+            <div class="coord-row">
+              <span class="coord-label">Longitude</span>
+              <span class="coord-value" id="val-lon">—</span>
+            </div>
+            <div class="risk-results" id="risk-results">
+              <div class="risk-row">
+                <span class="risk-label">🌊 Banjir</span>
+                <span class="risk-badge risk-unknown" id="risk-banjir">Click map</span>
+              </div>
+              <div class="risk-row">
+                <span class="risk-label">🔴 Gempa</span>
+                <span class="risk-badge risk-unknown" id="risk-gempa">Click map</span>
+              </div>
+              <div class="risk-row">
+                <span class="risk-label">⚠️ Likuifikasi</span>
+                <span class="risk-badge risk-unknown" id="risk-likuifikasi">Click map</span>
+              </div>
+              <div class="risk-row">
+                <span class="risk-label">🚨 Kriminalitas</span>
+                <span class="risk-badge risk-unknown" id="risk-kriminalitas">Click map</span>
+              </div>
+            </div>
+            <p class="hint-text" id="hint-text">Click anywhere on the map to identify risk values at that location.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        Data source: BNPB InaRISK &bull; ArcGIS JS SDK 4.29
+      </div>
+    </aside>
+
+    <!-- ── Mobile Toggle ────────────────────── -->
+    <button id="toggle-sidebar" title="Toggle sidebar">☰</button>
+
+    <!-- ── Map ──────────────────────────────── -->
+    <div id="map-container">
+      <div id="viewDiv"></div>
+      <div id="loading-overlay">
+        <div class="loader-ring"></div>
+        <div class="loader-text">Loading map layers…</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    require([
+      "esri/Map",
+      "esri/views/MapView",
+      "esri/layers/ImageryLayer",
+      "esri/layers/FeatureLayer",
+      "esri/widgets/Legend",
+      "esri/widgets/ScaleBar",
+      "esri/widgets/Zoom",
+      "esri/Graphic",
+      "esri/rest/locator",
+      "esri/geometry/Point"
+    ], function (Map, MapView, ImageryLayer, FeatureLayer, Legend, ScaleBar, Zoom, Graphic, locator, Point) {
+
+      // Determine baseline API URL protocol map routing
+      var proxyBase = "/api/v1/risk/proxy/";
+      var crimeProxyBase = "/api/v1/risk/proxy-crime/";
+      if (window.location.protocol === "file:") {
+        proxyBase = "http://localhost:8080/api/v1/risk/proxy/";
+        crimeProxyBase = "http://localhost:8080/api/v1/risk/proxy-crime/";
+      }
+
+      // ── Layer URLs ────────────────────────────
+      const LAYER_CONFIG = {
+        banjir: {
+          url: proxyBase + "inarisk/INDEKS_BAHAYA_BANJIR/ImageServer",
+          title: "Bahaya Banjir (Flood Risk)",
+          type: "imagery"
+        },
+        gempa: {
+          url: proxyBase + "inarisk/layer_bahaya_gempabumi_klasifikasi_PVMBG/ImageServer",
+          title: "Bahaya Gempa Bumi (Earthquake)",
+          type: "imagery"
+        },
+        likuifikasi: {
+          url: proxyBase + "inarisk/INDEKS_BAHAYA_LIKUEFAKSI/ImageServer",
+          title: "Bahaya Likuifikasi (Liquefaction)",
+          type: "imagery"
+        },
+        kriminalitas: {
+          url: crimeProxyBase + "Indonesia_Crime_Map/FeatureServer/0",
+          title: "Indeks Kriminalitas (Criminality Index)",
+          type: "feature"
+        }
+      };
+
+      // ── Create Layers ─────────────────────────
+      var layers = {};
+      Object.keys(LAYER_CONFIG).forEach(function (key) {
+        var cfg = LAYER_CONFIG[key];
+        if (cfg.type === "feature") {
+          // Criminality: UniqueValueRenderer by crime type + visual size by total_crim
+          // Matches the ArcGIS MapViewer "Types and Size" style
+          var crimeRenderer = {
+            type: "unique-value",
+            field: "dominant",
+            defaultSymbol: {
+              type: "simple-fill",
+              color: [160, 160, 160, 0.45],
+              outline: { color: [255, 255, 255, 0.6], width: 0.5 }
+            },
+            uniqueValueInfos: [
+              {
+                value: "Property",
+                label: "Property Crime",
+                symbol: { type: "simple-fill", color: [239, 68, 68, 0.45],
+                  outline: { color: [239, 68, 68, 0.85], width: 1.5 } }
+              },
+              {
+                value: "Physical",
+                label: "Physical Crime",
+                symbol: { type: "simple-fill", color: [59, 130, 246, 0.45],
+                  outline: { color: [59, 130, 246, 0.85], width: 1.5 } }
+              },
+              {
+                value: "Narcotics",
+                label: "Narcotics",
+                symbol: { type: "simple-fill", color: [34, 197, 94, 0.45],
+                  outline: { color: [34, 197, 94, 0.85], width: 1.5 } }
+              },
+              {
+                value: "Fraud/Corruption",
+                label: "Fraud / Corruption",
+                symbol: { type: "simple-fill", color: [168, 85, 247, 0.45],
+                  outline: { color: [168, 85, 247, 0.85], width: 1.5 } }
+              }
+            ],
+            visualVariables: [
+              {
+                // Lighten fill for low-crime areas, saturate for high-crime
+                type: "opacity",
+                field: "total_crim",
+                stops: [
+                  { value: 688,   opacity: 0.20 },
+                  { value: 5000,  opacity: 0.45 },
+                  { value: 15000, opacity: 0.70 },
+                  { value: 32232, opacity: 0.92 }
+                ]
+              }
+            ]
+          };
+
+          layers[key] = new FeatureLayer({
+            url: cfg.url,
+            title: cfg.title,
+            opacity: 0.85,
+            visible: true,
+            renderer: crimeRenderer,
+            popupTemplate: {
+              title: "{NAME_1}",
+              content: [
+                {
+                  type: "fields",
+                  fieldInfos: [
+                    { fieldName: "dominant",   label: "Dominant Crime Type" },
+                    { fieldName: "total_crim", label: "Total Crimes",
+                      format: { digitSeparator: true, places: 0 } },
+                    { fieldName: "risk_lvl",   label: "Risk Level" }
+                  ]
+                }
+              ]
+            }
+          });
+        } else {
+          layers[key] = new ImageryLayer({
+            url: cfg.url,
+            title: cfg.title,
+            opacity: 0.7,
+            visible: true
+          });
+        }
+      });
+
+      // ── Map & View ────────────────────────────
+      var map = new Map({
+        basemap: "dark-gray-vector",
+        layers: [layers.banjir, layers.gempa, layers.likuifikasi, layers.kriminalitas]
+      });
+
+      var view = new MapView({
+        container: "viewDiv",
+        map: map,
+        center: [118, -2.5],
+        zoom: 5,
+        ui: { components: [] },
+        popup: { dockEnabled: false, collapseEnabled: false },
+        constraints: { minZoom: 4 }
+      });
+
+      // ── Widgets ───────────────────────────────
+      var legend = new Legend({
+        view: view,
+        style: { type: "card", layout: "side-by-side" }
+      });
+      view.ui.add(legend, "bottom-right");
+
+      var scaleBar = new ScaleBar({ view: view, unit: "metric", style: "line" });
+      view.ui.add(scaleBar, "bottom-left");
+
+      var zoom = new Zoom({ view: view });
+      view.ui.add(zoom, "top-right");
+
+      // ── Loading ───────────────────────────────
+      var overlay = document.getElementById("loading-overlay");
+
+      view.when(function () {
+        // Track layer load status
+        var loadPromises = Object.keys(layers).map(function (key) {
+          return layers[key].when();
+        });
+
+        Promise.all(loadPromises)
+          .then(function () { overlay.classList.add("hidden"); })
+          .catch(function () { overlay.classList.add("hidden"); });
+
+        // Fallback in case layers don't load
+        setTimeout(function () { overlay.classList.add("hidden"); }, 8000);
+      });
+
+      // ── Layer Toggle & Opacity ────────────────
+      Object.keys(layers).forEach(function (key) {
+        var toggleEl = document.getElementById("toggle-" + key);
+        var opacityEl = document.getElementById("opacity-" + key);
+        var cardEl = document.getElementById("card-" + key);
+
+        toggleEl.addEventListener("change", function () {
+          layers[key].visible = toggleEl.checked;
+          if (toggleEl.checked) {
+            cardEl.classList.add("active");
+          } else {
+            cardEl.classList.remove("active");
+          }
+        });
+
+        opacityEl.addEventListener("input", function () {
+          layers[key].opacity = parseInt(opacityEl.value) / 100;
+        });
+      });
+
+      // ── Sidebar Toggle ────────────────────────
+      var sidebar = document.getElementById("sidebar");
+      var toggleBtn = document.getElementById("toggle-sidebar");
+
+      toggleBtn.addEventListener("click", function () {
+        sidebar.classList.toggle("collapsed");
+      });
+
+      // Allow closing sidebar by clicking outside on mobile
+      document.getElementById("map-container").addEventListener("click", function () {
+        if (window.innerWidth <= 768 && !sidebar.classList.contains("collapsed")) {
+          sidebar.classList.add("collapsed");
+        }
+      });
+
+      // ── Click-to-Identify ─────────────────────
+      var markerGraphic = null;
+
+      function identifyAtPoint(mapPoint) {
+        var lat = Math.round(mapPoint.latitude * 10000) / 10000;
+        var lon = Math.round(mapPoint.longitude * 10000) / 10000;
+
+        // Update coordinates
+        document.getElementById("val-lat").textContent = lat;
+        document.getElementById("val-lon").textContent = lon;
+        document.getElementById("hint-text").textContent = "Querying layers…";
+
+        // Set all badges to loading
+        ["banjir", "gempa", "likuifikasi", "kriminalitas"].forEach(function (key) {
+          var badge = document.getElementById("risk-" + key);
+          badge.textContent = "Loading…";
+          badge.className = "risk-badge risk-unknown";
+        });
+
+        // Drop marker
+        if (markerGraphic) { view.graphics.remove(markerGraphic); }
+        markerGraphic = new Graphic({
+          geometry: mapPoint,
+          symbol: {
+            type: "simple-marker",
+            color: [96, 165, 250, 0.8],
+            size: "14px",
+            outline: { color: [255, 255, 255, 0.9], width: 2 }
+          }
+        });
+        view.graphics.add(markerGraphic);
+
+        // Determine API URL based on protocol to support local file:// testing
+        var apiUrl = "/api/v1/risk";
+        if (window.location.protocol === "file:") {
+          // Fallback to localhost when opening the HTML file directly
+          apiUrl = "http://localhost:8080/api/v1/risk";
+        }
+
+        // Fetch risk from FastAPI backend
+        fetch(apiUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ latitude: lat, longitude: lon })
+        })
+        .then(function (response) {
+          if (!response.ok) {
+            throw new Error("HTTP error! status: " + response.status);
+          }
+          return response.json();
+        })
+        .then(function (data) {
+          var riskMapping = {
+            "banjir": data.risiko_banjir,
+            "gempa": data.risiko_gempa,
+            "likuifikasi": data.risiko_likuifikasi,
+            "kriminalitas": data.risiko_kriminalitas
+          };
+
+          Object.keys(riskMapping).forEach(function (key) {
+            var badge = document.getElementById("risk-" + key);
+            var val = riskMapping[key];
+            if (val && val !== "Tidak Diketahui") {
+              var riskInfo = classifyRisk(String(val).trim());
+              badge.textContent = riskInfo.label;
+              badge.className = "risk-badge " + riskInfo.cls;
+            } else {
+              badge.textContent = "No Data";
+              badge.className = "risk-badge risk-unknown";
+            }
+          });
+          document.getElementById("hint-text").textContent = "Click anywhere on the map to identify risk values at that location.";
+        })
+        .catch(function (err) {
+          console.error("Identify error:", err);
+          ["banjir", "gempa", "likuifikasi", "kriminalitas"].forEach(function (key) {
+            var badge = document.getElementById("risk-" + key);
+            badge.textContent = "Error";
+            badge.className = "risk-badge risk-unknown";
+          });
+          document.getElementById("hint-text").textContent = "Failed to fetch risk data. Please try again.";
+        });
+      }
+
+      view.on("click", function (event) {
+        identifyAtPoint(event.mapPoint);
+      });
+
+      // ── Search / Go-to-Location ────────────────
+      var GEOCODE_URL = "https://geocode-api.arcgis.com/arcgis/rest/services/World/GeocodeServer";
+
+      // Tab switching
+      var tabLocation = document.getElementById("tab-location");
+      var tabCoords   = document.getElementById("tab-coords");
+      var panelLocation = document.getElementById("panel-location");
+      var panelCoords   = document.getElementById("panel-coords");
+
+      tabLocation.addEventListener("click", function () {
+        tabLocation.classList.add("active"); tabCoords.classList.remove("active");
+        panelLocation.classList.add("active"); panelCoords.classList.remove("active");
+      });
+      tabCoords.addEventListener("click", function () {
+        tabCoords.classList.add("active"); tabLocation.classList.remove("active");
+        panelCoords.classList.add("active"); panelLocation.classList.remove("active");
+      });
+
+      // Helper: navigate to a point
+      function goToPoint(lat, lon, zoomLevel) {
+        var point = new Point({ latitude: lat, longitude: lon });
+        view.goTo({ target: point, zoom: zoomLevel || 12 }, { duration: 1200, easing: "ease-in-out" })
+          .then(function () { identifyAtPoint(point); });
+      }
+
+      // ── Location Search (geocoding) ────────────
+      var inputLocation  = document.getElementById("input-location");
+      var btnSearch      = document.getElementById("btn-search");
+      var searchStatus   = document.getElementById("search-status");
+      var searchResults  = document.getElementById("search-results");
+
+      function performSearch() {
+        var query = inputLocation.value.trim();
+        if (!query) return;
+
+        btnSearch.disabled = true;
+        btnSearch.textContent = "Searching…";
+        searchStatus.className = "search-status visible";
+        searchStatus.textContent = "Searching…";
+        searchResults.innerHTML = "";
+
+        locator.addressToLocations(GEOCODE_URL, {
+          address: { SingleLine: query },
+          maxLocations: 6,
+          outFields: ["Addr_type", "Match_addr", "StAddr", "City", "Region"]
+        }).then(function (results) {
+          btnSearch.disabled = false;
+          btnSearch.textContent = "Search";
+
+          if (!results || results.length === 0) {
+            searchStatus.className = "search-status visible error";
+            searchStatus.textContent = "No results found.";
+            return;
+          }
+
+          searchStatus.className = "search-status";
+          results.forEach(function (result) {
+            var item = document.createElement("div");
+            item.className = "search-result-item";
+
+            var name = document.createElement("div");
+            name.className = "search-result-name";
+            name.textContent = result.attributes.Match_addr || result.address;
+            item.appendChild(name);
+
+            var details = [];
+            if (result.attributes.City) details.push(result.attributes.City);
+            if (result.attributes.Region) details.push(result.attributes.Region);
+            if (details.length > 0) {
+              var type = document.createElement("div");
+              type.className = "search-result-type";
+              type.textContent = details.join(", ");
+              item.appendChild(type);
+            }
+
+            item.addEventListener("click", function () {
+              goToPoint(result.location.latitude, result.location.longitude, 13);
+              searchResults.innerHTML = "";
+            });
+
+            searchResults.appendChild(item);
+          });
+        }).catch(function (err) {
+          console.error("Geocoding error:", err);
+          btnSearch.disabled = false;
+          btnSearch.textContent = "Search";
+          searchStatus.className = "search-status visible error";
+          searchStatus.textContent = "Search failed. Please try again.";
+        });
+      }
+
+      btnSearch.addEventListener("click", performSearch);
+      inputLocation.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); performSearch(); }
+      });
+
+      // ── Coordinate Input ───────────────────────
+      var inputLat = document.getElementById("input-lat");
+      var inputLon = document.getElementById("input-lon");
+      var btnGoto  = document.getElementById("btn-goto");
+
+      btnGoto.addEventListener("click", function () {
+        var lat = parseFloat(inputLat.value);
+        var lon = parseFloat(inputLon.value);
+        if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+          alert("Please enter valid coordinates (Lat: -90 to 90, Lon: -180 to 180).");
+          return;
+        }
+        goToPoint(lat, lon, 13);
+      });
+
+      // Allow Enter key in coordinate fields
+      [inputLat, inputLon].forEach(function (el) {
+        el.addEventListener("keydown", function (e) {
+          if (e.key === "Enter") { e.preventDefault(); btnGoto.click(); }
+        });
+      });
+
+      /**
+       * Classify a pixel value into a risk label and CSS class.
+       */
+      function classifyRisk(val) {
+        var lower = val.toLowerCase();
+        if (lower.indexOf("sangat tinggi") !== -1 || lower.indexOf("very high") !== -1) {
+          return { label: "Sangat Tinggi (Very High)", cls: "risk-sangat-tinggi" };
+        }
+        if (lower.indexOf("3") !== -1 || lower.indexOf("tinggi") !== -1 || lower.indexOf("high") !== -1) {
+          return { label: "Tinggi (High)", cls: "risk-tinggi" };
+        }
+        if (lower.indexOf("2") !== -1 || lower.indexOf("sedang") !== -1 || lower.indexOf("medium") !== -1) {
+          return { label: "Sedang (Medium)", cls: "risk-sedang" };
+        }
+        if (lower.indexOf("1") !== -1 || lower.indexOf("rendah") !== -1 || lower.indexOf("low") !== -1) {
+          return { label: "Rendah (Low)", cls: "risk-rendah" };
+        }
+        if (lower.indexOf("0") !== -1 || lower.indexOf("aman") !== -1 || lower === "nodata") {
+          return { label: "Aman (Safe)", cls: "risk-aman" };
+        }
+        // Return raw value if we can't classify
+        return { label: val, cls: "risk-unknown" };
+      }
+
+    });
+  </script>
+</body>
+</html>
